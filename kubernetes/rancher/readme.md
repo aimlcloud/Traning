@@ -11,12 +11,15 @@ Few points to note here:
 
 * Benefit of Virtual infrastructure is that it's immutable
   a) We can add and throw away virtual machines at will.
+
   b) This makes maintenance easier as we can roll updated virtual machines instead of 
      patching existing machines and turning them to long-living snowflakes.
+
   c) Reduce lifespan of machines
 
 * Bare Metal provides the compute. 
   a) We don't want Kubernetes directly on bare metal as we want machines to be immutable.
+
   b) This goes back to the previous point on immutability.
 
 * Every virtual machine needs to be able to reach each other on the network
@@ -33,8 +36,9 @@ Open Powershell in administrator
 Get-NetAdapter
 
 Import-Module Hyper-V
-$ethernet = Get-NetAdapter -Name "Ethernet"
-New-VMSwitch -Name "virtual-network" -NetAdapterName $ethernet.Name -AllowManagementOS $true -Notes "shared virtual network interface"
+
+New-VMSwitch -Name "virtual-network" -NetAdapterName (Get-NetAdapter | Where-Object {$_.Status -eq "Up" -and $_.InterfaceDescription -Match "Wi-Fi"}).Name -AllowManagementOS $true -SwitchType External
+
 ```
 
 # Hyper-V : Create our machines
@@ -46,10 +50,12 @@ Let's create three:
 mkdir D:\temp\vms\master-0\
 mkdir D:\temp\vms\worker-1\
 mkdir D:\temp\vms\worker-2\
+mkdir D:\temp\vm\rancher\
 
 New-VHD -Path D:\temp\vms\master-0\worker-0.vhdx -SizeBytes 30GB
 New-VHD -Path D:\temp\vms\worker-1\worker-1.vhdx -SizeBytes 30GB
 New-VHD -Path D:\temp\vms\worker-2\worker-2.vhdx -SizeBytes 30GB
+New-VHD -Path D:\temp\vms\rancher\rancher.vhdx -SizeBytes 30GB
 ```
 
 ```
@@ -59,7 +65,7 @@ New-VM `
 -MemoryStartupBytes 2048MB `
 -SwitchName "virtual-network" `
 -VHDPath "D:\temp\vms\master-0\master-0.vhdx" `
--Path "c:\temp\vms\master-0\"
+-Path "D:\temp\vms\master-0\"
 
 New-VM `
 -Name "worker-1" `
@@ -77,6 +83,14 @@ New-VM `
 -VHDPath "D:\temp\vms\worker-2\worker-2.vhdx" `
 -Path "D:\temp\vms\worker-2\"
 
+New-VM `
+-Name "rancher" `
+-Generation 1 `
+-MemoryStartupBytes 2048MB `
+-SwitchName "virtual-network" `
+-VHDPath "D:\temp\vms\rancher-2\rancher.vhdx" `
+-Path "D:\temp\vms\rancher\"
+
 ```
 
 Setup a DVD drive that holds the `iso` file for Ubuntu Server
@@ -86,18 +100,49 @@ Copy from download diretory to  "D:\temp"
 Set-VMDvdDrive -VMName "linux-0" -ControllerNumber 1 -Path "D:\temp\ubuntu-22.04.5-live-server-amd64.iso"
 Set-VMDvdDrive -VMName "linux-1" -ControllerNumber 1 -Path "D:\temp\ubuntu-22.04.5-live-server-amd64.iso"
 Set-VMDvdDrive -VMName "linux-2" -ControllerNumber 1 -Path "D:\temp\ubuntu-22.04.5-live-server-amd64.iso"
+Set-VMDvdDrive -VMName "rancher" -ControllerNumber 1 -Path "D:\temp\ubuntu-22.04.5-live-server-amd64.iso"
 ```
 
 Start our VM's
 
 ```
 Start-VM -Name "master-0"
-Start-VM -Name "master-1"
-Start-VM -Name "master-2"
+Start-VM -Name "worker-1"
+Start-VM -Name "worker-2"
+Start-VM -Name "rancher"
+
 ```
 
 Now we can open up Hyper-v Manager and see our infrastructure. </br>
 In this video we'll connect to each server, and run through the initial ubuntu setup. </br>
+
+While initial ubuntu setup use below ips for the server cofiguration
+```
+master:
+Subnet: 192.168.1.1/24
+IP : 192.168.1.100/24
+Gateway: 192.168.1.1
+nameserver: 8.8.8.8,1.1.1.1
+
+worker1: 
+Subnet: 192.168.1.1/24
+IP : 192.168.1.101/24
+Gateway: 192.168.1.1
+nameserver: 8.8.8.8,1.1.1.1
+
+worker2: 
+Subnet: 192.168.1.1/24
+IP : 192.168.1.102/24
+Gateway: 192.168.1.1
+nameserver: 8.8.8.8,1.1.1.1
+
+rancher: 
+Subnet: 192.168.1.1/24
+IP : 192.168.1.103/24
+Gateway: 192.168.1.1
+nameserver: 8.8.8.8,1.1.1.1
+
+```
 Once finished, select the option to reboot and once it starts, you will notice an `unmount` error on CD-Rom </br>
 This is ok, just shut down the server and start it up again.
 
@@ -122,17 +167,17 @@ Record the IP address of each VM so we can SSH to it:
 ```
 sudo ifconfig
 # record eth0
-linux-0 IP=192.168.0.16
-linux-1 IP=192.168.0.17
-linux-2 IP=192.168.0.18
+master-0 IP=192.168.1.100
+worker-1 IP=192.168.1.101
+worker-2 IP=192.168.1.102
 ```
 
 In new Powershell windows, let's SSH to our VMs
 
 ```
-ssh linux-0@192.168.0.16
-ssh linux-1@192.168.0.17
-ssh linux-2@192.168.0.18
+ssh master@192.168.1.100
+ssh worker@192.168.1.101
+ssh worker@192.168.1.102
 ```
 
 # Setup Docker
@@ -146,7 +191,16 @@ curl -sSL https://get.docker.com/ | sh
 sudo usermod -aG docker $(whoami)
 sudo service docker start
 ```
+# Upda the /etc/host 
 
+It is required to  update all the vms ip in each vm 
+```
+vi /etc/host
+192.168.1.100 master
+192.168.1.101 worker1
+192.168.1.102 worker2
+192.168.1.103 rancher
+```
 # Running Rancher in Docker
 
 So Rancher can be [deployed](https://rancher.com/docs/rancher/v2.5/en/quick-start-guide/deployment/) almost anywhere. </br>
@@ -169,7 +223,13 @@ cd kubernetes/rancher
 mkdir volume
 
 ```
-
+## Update the /etc/host file 
+```
+192.168.1.100 master
+192.168.1.101 worker1
+192.168.1.102 worker2
+192.168.1.103 rancher
+```
 ## Run Rancher
 
 ```
