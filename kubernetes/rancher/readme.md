@@ -286,6 +286,11 @@ master    Ready    control-plane,master   39m   v1.32.6+k3s1
 worker1   Ready    <none>                 26m   v1.32.6+k3s1
 root@master:~#
 ```
+## Add the label to the worker vm   
+Run cmd from master
+```
+kubectl label node worker1 node-role.kubernetes.io/worker=""
+```
 ## HOW TO ADD THE cluster and NODES TO RANCHER 
 
  Go to Rancher UI → Cluster Management → Import existing 
