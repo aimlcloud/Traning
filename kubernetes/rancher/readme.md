@@ -116,7 +116,7 @@ Start-VM -Name "rancher"
 Now we can open up Hyper-v Manager and see our infrastructure. </br>
 In this video we'll connect to each server, and run through the initial ubuntu setup. </br>
 
-While initial ubuntu setup use below ips for the server cofiguration
+While initial ubuntu setup rootvg size is 25GB abd use below ips for the server cofiguration
 ```
 master:
 Subnet: 192.168.1.1/24
@@ -256,36 +256,45 @@ ipconfig
 
 We can now access Rancher on [localhost](https://localhost)
 
-## Deploy Sample Workloads
+## Deploy k3s in master and worker nodes  and attached them to rancher 
 
-To deploy some sample basic workloads, let's get the `kubeconfig` for our cluster </br>
-
-Set kubeconfig:
-
+Master :
+ Logi to the master  vm  
+ Swith to root 
+ Install the k3s 
 ```
-$ENV:KUBECONFIG="<path-to-kubeconfig>"
+ curl -sfL https://get.k3s.io | sh -
+ sudo k3s kubectl get nodes
+ mkdir -p ~/.kube
+sudo cp /etc/rancher/k3s/k3s.yaml ~/.kube/config
+sudo chown $USER:$USER ~/.kube/config
+``
+Worker nodes :
+Login to the worker vm
+switch to root
+Install the k3s
+
+Get the node token from master node: "sudo cat /var/lib/rancher/k3s/server/node-token
+
+curl -sfL https://get.k3s.io | K3S_URL=https://192.168.1.100:6443 K3S_TOKEN=<TOKEN> sh -
+
+Login to the master node 
+Kubectl get nodes 
+root@master:~# kubectl get nodes
+NAME      STATUS   ROLES                  AGE   VERSION
+master    Ready    control-plane,master   39m   v1.32.6+k3s1
+worker1   Ready    <none>                 26m   v1.32.6+k3s1
+root@master:~#
 ```
+## HOW TO ADD THE cluster and NODES TO RANCHER 
 
-Deploy 2 pods, and a service:
+ Go to Rancher UI → Cluster Management → Import existing 
 
-```
-kubectl create ns marcel
-kubectl -n marcel apply -f .\kubernetes\configmaps\configmap.yaml
-kubectl -n marcel apply -f .\kubernetes\secrets\secret.yaml
-kubectl -n marcel apply -f .\kubernetes\deployments\deployment.yaml
-kubectl -n marcel apply -f .\kubernetes\services\service.yaml
-```
+ Choose "generic"  --create the cluster 
 
-One caveat is because we are not a cloud provider, Kubernetes does not support our service `type=LoadBalancer`. </br>
-For that, we need something like `metallb`. </br>
-However - we can `port-forward`
+ Copy the install script command (with tokens)
 
-```
-kubectl -n marcel get svc 
-NAME              TYPE           CLUSTER-IP      EXTERNAL-IP   PORT(S)        AGE
-example-service   LoadBalancer   10.43.235.240   <pending>     80:31310/TCP   13s
+ Run it on your target mastervm(s)
 
-kubectl -n marcel port-forward svc/example-service 81:80
-```
 
-We can access our example-app on port 81
+
